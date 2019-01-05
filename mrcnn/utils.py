@@ -577,7 +577,9 @@ def unmold_mask(mask, bbox, image_shape):
 ############################################################
 #  Anchors
 ############################################################
-
+#定义产生anchor的方法
+#feturestride在多个featuremap上以s的间隔选择featuremap提取anchor
+# anchorstride 是在一个featuremap上，以s的间隔在像素点产生anchor
 def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
     """
     scales: 1D array of anchor sizes in pixels. Example: [32, 64, 128]
@@ -589,40 +591,46 @@ def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
         value is 2 then generate anchors for every other feature map pixel.
     """
     # Get all combinations of scales and ratios
-    scales, ratios = np.meshgrid(np.array(scales), np.array(ratios))
+    scales, ratios = np.meshgrid(np.array(scales), np.array(ratios)) #scale为行，ratio为列，产生一个矩阵，
     scales = scales.flatten()
     ratios = ratios.flatten()
 
     # Enumerate heights and widths from scales and ratios
+    #计算不同ratio锚框的高度和宽度
     heights = scales / np.sqrt(ratios)
     widths = scales * np.sqrt(ratios)
 
     # Enumerate shifts in feature space
+    #特征层像素点采样，映射回原始图像，得到每个锚框的中心点坐标，(256,256)
     shifts_y = np.arange(0, shape[0], anchor_stride) * feature_stride
     shifts_x = np.arange(0, shape[1], anchor_stride) * feature_stride
     shifts_x, shifts_y = np.meshgrid(shifts_x, shifts_y)
 
     # Enumerate combinations of shifts, widths, and heights
+    # 根据宽度和锚框x方向的中心，得到宽度和x方向中心的对应矩阵，（256×256, 3）
     box_widths, box_centers_x = np.meshgrid(widths, shifts_x)
     box_heights, box_centers_y = np.meshgrid(heights, shifts_y)
 
     # Reshape to get a list of (y, x) and a list of (h, w)
+    # 沿着新轴axis=2堆叠矩阵，此时（256×256,3,2），再reshape为（256×256×3,2），
+    # 每行为一个锚框的中心点坐标和高度/宽度尺寸
     box_centers = np.stack(
         [box_centers_y, box_centers_x], axis=2).reshape([-1, 2])
     box_sizes = np.stack([box_heights, box_widths], axis=2).reshape([-1, 2])
 
     # Convert to corner coordinates (y1, x1, y2, x2)
+    # 沿着轴axis=1(列方向)拼接中心点和尺寸，得到(256*256*3,4)
     boxes = np.concatenate([box_centers - 0.5 * box_sizes,
                             box_centers + 0.5 * box_sizes], axis=1)
     return boxes
 
-
+#定义在不同层产生金字塔anchor
 def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
                              anchor_stride):
     """Generate anchors at different levels of a feature pyramid. Each scale
     is associated with a level of the pyramid, but each ratio is used in
     all levels of the pyramid.
-
+在不同特征层中锚框的尺寸是不同的，但是3种长宽比都是通用的。
     Returns:
     anchors: [N, (y1, x1, y2, x2)]. All generated anchors in one array. Sorted
         with the same order of the given scales. So, anchors of scale[0] come
@@ -631,10 +639,10 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
     # Anchors
     # [anchor_count, (y1, x1, y2, x2)]
     anchors = []
-    for i in range(len(scales)):
+    for i in range(len(scales)): #不同层产生anchor
         anchors.append(generate_anchors(scales[i], ratios, feature_shapes[i],
                                         feature_strides[i], anchor_stride))
-    return np.concatenate(anchors, axis=0)
+    return np.concatenate(anchors, axis=0)  #所有的anchor放在一起放回
 
 
 ############################################################
@@ -803,6 +811,7 @@ def batch_slice(inputs, graph_fn, batch_size, names=None):
     computation graph and then combines the results. It allows you to run a
     graph on a batch of inputs even if the graph is written to support one
     instance only.
+    把输入分成多个slices然后分别喂给给定的计算图，最后聚合成结果返回。
 
     inputs: list of tensors. All must have the same first dimension length
     graph_fn: A function that returns a TF tensor that's part of a graph.
