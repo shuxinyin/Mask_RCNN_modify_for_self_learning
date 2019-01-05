@@ -25,7 +25,6 @@ from distutils.version import LooseVersion
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
-
 ############################################################
 #  Bounding Boxes
 ############################################################
@@ -33,18 +32,21 @@ COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0
 def extract_bboxes(mask):
     """Compute bounding boxes from masks.
     mask: [height, width, num_instances]. Mask pixels are either 1 or 0.
+    numinstance是有实例的个数也就是物体类型数
+    coco的numinstance是80个
 
     Returns: bbox array [num_instances, (y1, x1, y2, x2)].
     """
-    boxes = np.zeros([mask.shape[-1], 4], dtype=np.int32)
+    boxes = np.zeros([mask.shape[-1], 4], dtype=np.int32) #[num_instances, (y1, x1, y2, x2)] 【80，4】
     for i in range(mask.shape[-1]):
-        m = mask[:, :, i]
+        m = mask[:, :, i]  #m是一张只有0/1的h*w的图片
         # Bounding box.
-        horizontal_indicies = np.where(np.any(m, axis=0))[0]
-        vertical_indicies = np.where(np.any(m, axis=1))[0]
+        #np.any(m,axis=0)，表示m按行表示，只要一行中有一个不为零，则为true，否则为false  axis=1 在列上表示
+        horizontal_indicies = np.where(np.any(m, axis=0))[0]  #np.where输出为true的行,[0]表示输出的首行
+        vertical_indicies = np.where(np.any(m, axis=1))[0]  #首列
         if horizontal_indicies.shape[0]:
-            x1, x2 = horizontal_indicies[[0, -1]]
-            y1, y2 = vertical_indicies[[0, -1]]
+            x1, x2 = horizontal_indicies[[0, -1]]   #因为bboxmask是方框左值,右值
+            y1, y2 = vertical_indicies[[0, -1]] #上值,下值
             # x2 and y2 should not be part of the box. Increment by 1.
             x2 += 1
             y2 += 1
@@ -55,7 +57,7 @@ def extract_bboxes(mask):
         boxes[i] = np.array([y1, x1, y2, x2])
     return boxes.astype(np.int32)
 
-
+#定义计算iou值的函数
 def compute_iou(box, boxes, box_area, boxes_area):
     """Calculates IoU of the given box with the array of the given boxes.
     box: 1D vector [y1, x1, y2, x2]
@@ -76,7 +78,7 @@ def compute_iou(box, boxes, box_area, boxes_area):
     iou = intersection / union
     return iou
 
-
+#计算IoU overlaps重叠度 参数是两个box的集和
 def compute_overlaps(boxes1, boxes2):
     """Computes IoU overlaps between two sets of boxes.
     boxes1, boxes2: [N, (y1, x1, y2, x2)].
@@ -95,7 +97,7 @@ def compute_overlaps(boxes1, boxes2):
         overlaps[:, i] = compute_iou(box2, boxes1, area2[i], area1)
     return overlaps
 
-
+#计算mask # overlap重叠度
 def compute_overlaps_masks(masks1, masks2):
     """Computes IoU overlaps between two sets of masks.
     masks1, masks2: [Height, Width, instances]
@@ -117,7 +119,7 @@ def compute_overlaps_masks(masks1, masks2):
 
     return overlaps
 
-
+#非极大值抑制
 def non_max_suppression(boxes, scores, threshold):
     """Performs non-maximum suppression and returns indices of kept boxes.
     boxes: [N, (y1, x1, y2, x2)]. Notice that (y2, x2) lays outside the box.
@@ -148,13 +150,13 @@ def non_max_suppression(boxes, scores, threshold):
         # Identify boxes with IoU over the threshold. This
         # returns indices into ixs[1:], so add 1 to get
         # indices into ixs.
-        remove_ixs = np.where(iou > threshold)[0] + 1
+        remove_ixs = np.where(iou > threshold)[0] + 1   #根据iou>阈值,添加到删除列表
         # Remove indices of the picked and overlapped boxes.
-        ixs = np.delete(ixs, remove_ixs)
-        ixs = np.delete(ixs, 0)
+        ixs = np.delete(ixs, remove_ixs)    #删掉重叠的
+        ixs = np.delete(ixs, 0)  #删掉得分最高的,循环剩下一个得分最高的
     return np.array(pick, dtype=np.int32)
 
-
+#bbox回归 给定boxes和修正值,返回修正后的坐标
 def apply_box_deltas(boxes, deltas):
     """Applies the given deltas to the given boxes.
     boxes: [N, (y1, x1, y2, x2)]. Note that (y2, x2) is outside the box.
@@ -178,7 +180,7 @@ def apply_box_deltas(boxes, deltas):
     x2 = x1 + width
     return np.stack([y1, x1, y2, x2], axis=1)
 
-
+#在classfication阶段,对box和gtbox计算出要修正的偏移量中心坐标平移和长宽缩放
 def box_refinement_graph(box, gt_box):
     """Compute refinement needed to transform box to gt_box.
     box and gt_box are [N, (y1, x1, y2, x2)]
@@ -204,7 +206,7 @@ def box_refinement_graph(box, gt_box):
     result = tf.stack([dy, dx, dh, dw], axis=1)
     return result
 
-
+#感觉和上面的一样
 def box_refinement(box, gt_box):
     """Compute refinement needed to transform box to gt_box.
     box and gt_box are [N, (y1, x1, y2, x2)]. (y2, x2) is
@@ -591,7 +593,8 @@ def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
         value is 2 then generate anchors for every other feature map pixel.
     """
     # Get all combinations of scales and ratios
-    scales, ratios = np.meshgrid(np.array(scales), np.array(ratios)) #scale为行，ratio为列，产生一个矩阵，
+    scales, ratios = np.meshgrid(np.array(scales), np.array(ratios)) #scales是一行数据,有numratio和行
+    #ratio是列,有numscales列数据
     scales = scales.flatten()
     ratios = ratios.flatten()
 
@@ -648,7 +651,7 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
 ############################################################
 #  Miscellaneous
 ############################################################
-
+#去零操作  去除整行零
 def trim_zeros(x):
     """It's common to have tensors larger than the available data and
     pad with zeros. This function removes rows that are all zeros.
@@ -658,7 +661,7 @@ def trim_zeros(x):
     assert len(x.shape) == 2
     return x[~np.all(x == 0, axis=1)]
 
-
+#计算预测和真实 box mask class的匹配度
 def compute_matches(gt_boxes, gt_class_ids, gt_masks,
                     pred_boxes, pred_class_ids, pred_scores, pred_masks,
                     iou_threshold=0.5, score_threshold=0.0):
@@ -678,7 +681,7 @@ def compute_matches(gt_boxes, gt_class_ids, gt_masks,
     pred_boxes = trim_zeros(pred_boxes)
     pred_scores = pred_scores[:pred_boxes.shape[0]]
     # Sort predictions by score from high to low
-    indices = np.argsort(pred_scores)[::-1]
+    indices = np.argsort(pred_scores)[::-1]  #predscore排序后的从大到小序号
     pred_boxes = pred_boxes[indices]
     pred_class_ids = pred_class_ids[indices]
     pred_scores = pred_scores[indices]
@@ -792,7 +795,7 @@ def compute_recall(pred_boxes, gt_boxes, iou):
     overlaps = compute_overlaps(pred_boxes, gt_boxes)
     iou_max = np.max(overlaps, axis=1)
     iou_argmax = np.argmax(overlaps, axis=1)
-    positive_ids = np.where(iou_max >= iou)[0]
+    positive_ids = np.where(iou_max >= iou)[0]  #放回满足条件
     matched_gt_boxes = iou_argmax[positive_ids]
 
     recall = len(set(matched_gt_boxes)) / gt_boxes.shape[0]

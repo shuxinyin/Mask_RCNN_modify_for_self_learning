@@ -281,9 +281,9 @@ class ProposalLayer(KE.Layer):
         self.proposal_count = proposal_count
         self.nms_threshold = nms_threshold
 
-    def call(self, inputs):
+    def call(self, inputs):   #从输入中提取score，deltas，anchors
         # Box Scores. Use the foreground class confidence. [Batch, num_rois, 1]
-        scores = inputs[0][:, :, 1]
+        scores = inputs[0][:, :, 1]  #input[0]对应第一个输入rpnprob[batch，numanchor，bg/fg]
         # Box deltas [batch, num_rois, 4]
         deltas = inputs[1]
         deltas = deltas * np.reshape(self.config.RPN_BBOX_STD_DEV, [1, 1, 4])   #deltas乘标准差
