@@ -329,14 +329,14 @@ class ProposalLayer(KE.Layer):
         # for small objects, so we're skipping it.
 
         # Non-max suppression  非极大值抑制
-        def nms(boxes, scores):
+        def nms(boxes, scores):#贪婪地按分数的降序选择边界框的子集序号
             indices = tf.image.non_max_suppression(
                 boxes, scores, self.proposal_count,
                 self.nms_threshold, name="rpn_non_max_suppression")
-            proposals = tf.gather(boxes, indices)
-            # Pad if needed
-            padding = tf.maximum(self.proposal_count - tf.shape(proposals)[0], 0)
-            proposals = tf.pad(proposals, [(0, padding), (0, 0)])
+            proposals = tf.gather(boxes, indices) #proposal就是从box中 按序号选择
+            # Pad if needed  box : [batch, num_anchors, (dy, dx, log(dh), log(dw))]
+            padding = tf.maximum(self.proposal_count - tf.shape(proposals)[0], 0) #如果选出来的proposal没有要求的多,就补零
+            proposals = tf.pad(proposals, [(0, padding), (0, 0)]) #在下面补零[1,2,3,4]即[上下左右]
             return proposals
         proposals = utils.batch_slice([boxes, scores], nms,
                                       self.config.IMAGES_PER_GPU)  #多【boxes，score】执行nms
@@ -354,23 +354,23 @@ def log2_graph(x):
     """Implementation of Log2. TF doesn't have a native implementation."""
     return tf.log(x) / tf.log(2.0)
 
-
+#在特征金字塔的多个水平执行ROIpooling 操作
 class PyramidROIAlign(KE.Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
 
     Params:
-    - pool_shape: [pool_height, pool_width] of the output pooled regions. Usually [7, 7]
+    - pool_shape: [pool_height, pool_width] of the output pooled regions. Usually [7, 7] 池化核大小
 
     Inputs:
-    - boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized
+    - boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized  box的结构
              coordinates. Possibly padded with zeros if not enough
              boxes to fill the array.
     - image_meta: [batch, (meta data)] Image details. See compose_image_meta()
     - feature_maps: List of feature maps from different levels of the pyramid.
-                    Each is [batch, height, width, channels]
+                    Each is [batch, height, width, channels] #特征结构
 
     Output:
-    Pooled regions in the shape: [batch, num_boxes, pool_height, pool_width, channels].
+    Pooled regions in the shape: [batch, num_boxes, pool_height, pool_width, channels].返回池化后的区域
     The width and height are those specific in the pool_shape in the layer
     constructor.
     """
@@ -380,6 +380,7 @@ class PyramidROIAlign(KE.Layer):
         self.pool_shape = tuple(pool_shape)
 
     def call(self, inputs):
+        # 计算在不同层的ROI下的ROIalig pooling，应该是计算了每一个lever的所有channels
         # Crop boxes [batch, num_boxes, (y1, x1, y2, x2)] in normalized coords
         boxes = inputs[0]
 
@@ -400,11 +401,22 @@ class PyramidROIAlign(KE.Layer):
         # Equation 1 in the Feature Pyramid Networks paper. Account for
         # the fact that our coordinates are normalized here.
         # e.g. a 224x224 ROI (in pixels) maps to P4
+        #计算ROI属于FPN中的哪一个level
+        #原图面积
         image_area = tf.cast(image_shape[0] * image_shape[1], tf.float32)
+        # 分两步计算每个 ROI 框需要在哪个层的特征图中进行 pooling
         roi_level = log2_graph(tf.sqrt(h * w) / (224.0 / tf.sqrt(image_area)))
+        # 不同尺度的ROI，使用不同特征层作为ROI
+        # pooling层的输入，大尺度ROI就用后面一些的金字塔层，比如P5；小尺度ROI就用前面一点的特征层，比如P4。
+        # 那怎么判断ROI改用那个层的输出呢？论文 K
+        # 使用如下公式，代码做了一点更改，替换为roi_level
+        # 224是ImageNet的标准输入，k0是基准值，设置为5，代表P5层的输出
+        # （原图大小就用P5层），w和h是ROI区域的长和宽，image_area是输入图片的长乘以宽，即输入图片的面积，
+        # 假设ROI是112 * 112 的大小，那么k = k0 - 1 = 5 - 1 = 4，意味着该ROI应该使用P4的特征层。
+        # k值会做取整处理，防止结果不是整数。
         roi_level = tf.minimum(5, tf.maximum(
-            2, 4 + tf.cast(tf.round(roi_level), tf.int32)))
-        roi_level = tf.squeeze(roi_level, 2)
+            2, 4 + tf.cast(tf.round(roi_level), tf.int32)))#roilevel在2-5之间
+        roi_level = tf.squeeze(roi_level, 2)  #Removes dimensions of size 1 from the shape of a tensor.
 
         # Loop through levels and apply ROI pooling to each. P2 to P5.
         pooled = []
@@ -421,6 +433,7 @@ class PyramidROIAlign(KE.Layer):
 
             # Stop gradient propogation to ROI proposals
             level_boxes = tf.stop_gradient(level_boxes)
+            #When executed in a graph, this op outputs its input tensor as-is.
             box_indices = tf.stop_gradient(box_indices)
 
             # Crop and Resize
@@ -467,7 +480,7 @@ class PyramidROIAlign(KE.Layer):
 ############################################################
 #  Detection Target Layer
 ############################################################
-
+#目标检测层 对两个box集合计算iou重叠度
 def overlaps_graph(boxes1, boxes2):
     """Computes IoU overlaps between two sets of boxes.
     boxes1, boxes2: [N, (y1, x1, y2, x2)].
@@ -476,10 +489,10 @@ def overlaps_graph(boxes1, boxes2):
     # every boxes1 against every boxes2 without loops.
     # TF doesn't have an equivalent to np.repeat() so simulate it
     # using tf.tile() and tf.reshape.
-    b1 = tf.reshape(tf.tile(tf.expand_dims(boxes1, 1),
-                            [1, 1, tf.shape(boxes2)[0]]), [-1, 4])
-    b2 = tf.tile(boxes2, [tf.shape(boxes1)[0], 1])
-    # 2. Compute intersections
+    b1 = tf.reshape(tf.tile(tf.expand_dims(boxes1, 1), #先添加一维[-1,n,4] 然后将调后的boxes1 按给定[1,1,n]连接
+                            [1, 1, tf.shape(boxes2)[0]]), [-1, 4])#最后reshape 成想要的形状[-1,4]
+    b2 = tf.tile(boxes2, [tf.shape(boxes1)[0], 1]) #box2也这么做
+    # 2. Compute intersections  计算重叠面积
     b1_y1, b1_x1, b1_y2, b1_x2 = tf.split(b1, 4, axis=1)
     b2_y1, b2_x1, b2_y2, b2_x2 = tf.split(b2, 4, axis=1)
     y1 = tf.maximum(b1_y1, b2_y1)
@@ -487,14 +500,14 @@ def overlaps_graph(boxes1, boxes2):
     y2 = tf.minimum(b1_y2, b2_y2)
     x2 = tf.minimum(b1_x2, b2_x2)
     intersection = tf.maximum(x2 - x1, 0) * tf.maximum(y2 - y1, 0)
-    # 3. Compute unions
+    # 3. Compute unions 计算并的面积
     b1_area = (b1_y2 - b1_y1) * (b1_x2 - b1_x1)
     b2_area = (b2_y2 - b2_y1) * (b2_x2 - b2_x1)
     union = b1_area + b2_area - intersection
-    # 4. Compute IoU and reshape to [boxes1, boxes2]
+    # 4. Compute IoU and reshape to [boxes1, boxes2] 计算iou'
     iou = intersection / union
     overlaps = tf.reshape(iou, [tf.shape(boxes1)[0], tf.shape(boxes2)[0]])
-    return overlaps #返回交并比（重叠率）
+    return overlaps #返回交并比（重叠率）返回连个box集合交并比矩阵
 
 #为每张图片生成检测目标，下采样proposals产生目标类别bbox回归和掩模
 def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config):
@@ -530,17 +543,19 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     proposals, _ = trim_zeros_graph(proposals, name="trim_proposals")
     gt_boxes, non_zeros = trim_zeros_graph(gt_boxes, name="trim_gt_boxes")
     gt_class_ids = tf.boolean_mask(gt_class_ids, non_zeros,
-                                   name="trim_gt_class_ids")
+                                   name="trim_gt_class_ids")  #只返回nonzeros中为true 的gtclassid序号
     gt_masks = tf.gather(gt_masks, tf.where(non_zeros)[:, 0], axis=2,
                          name="trim_gt_masks")
 
-    # Handle COCO crowds
-    # A crowd box in COCO is a bounding box around several instances. Exclude
+    # Handle COCO crowds#这是在处理coco数据,图片中的问题
+    # A crowd box in COCO is a bounding box around several instances. Exclude  crowd值的是一个bbox中有好几个实例,
+    # 这个bbox必须设置成neg
     # them from training. A crowd box is given a negative class ID.
     crowd_ix = tf.where(gt_class_ids < 0)[:, 0]
     non_crowd_ix = tf.where(gt_class_ids > 0)[:, 0]
     crowd_boxes = tf.gather(gt_boxes, crowd_ix)
     crowd_masks = tf.gather(gt_masks, crowd_ix, axis=2)
+    #从一个bbox只有一个实例的bbox中提取 id mask box坐标
     gt_class_ids = tf.gather(gt_class_ids, non_crowd_ix)
     gt_boxes = tf.gather(gt_boxes, non_crowd_ix)
     gt_masks = tf.gather(gt_masks, non_crowd_ix, axis=2)
@@ -549,15 +564,15 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     overlaps = overlaps_graph(proposals, gt_boxes)  #计算proposals和gtbox的iou值
 
     # Compute overlaps with crowd boxes [proposals, crowd_boxes]
-    crowd_overlaps = overlaps_graph(proposals, crowd_boxes)
+    crowd_overlaps = overlaps_graph(proposals, crowd_boxes)  #计算proposals和crowbox的iou值
     crowd_iou_max = tf.reduce_max(crowd_overlaps, axis=1)
-    no_crowd_bool = (crowd_iou_max < 0.001)
+    no_crowd_bool = (crowd_iou_max < 0.001)  #nocrow是背景
 
     # Determine positive and negative ROIs
     roi_iou_max = tf.reduce_max(overlaps, axis=1)
     # 1. Positive ROIs are those with >= 0.5 IoU with a GT box
-    positive_roi_bool = (roi_iou_max >= 0.5)
-    positive_indices = tf.where(positive_roi_bool)[:, 0]
+    positive_roi_bool = (roi_iou_max >= 0.5)   #roi就是proposals现在对他们进行pooling,
+    positive_indices = tf.where(positive_roi_bool)[:, 0]  #positive roi的序号
     # 2. Negative ROIs are those with < 0.5 with every GT box. Skip crowds.
     negative_indices = tf.where(tf.logical_and(roi_iou_max < 0.5, no_crowd_bool))[:, 0]
 
@@ -565,13 +580,13 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     # Positive ROIs
     positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
                          config.ROI_POSITIVE_RATIO)
-    positive_indices = tf.random_shuffle(positive_indices)[:positive_count]
-    positive_count = tf.shape(positive_indices)[0]
+    positive_indices = tf.random_shuffle(positive_indices)[:positive_count]  #随机选取1/3的正样本序号
+    positive_count = tf.shape(positive_indices)[0] #统计正框个数
     # Negative ROIs. Add enough to maintain positive:negative ratio.
     r = 1.0 / config.ROI_POSITIVE_RATIO
     negative_count = tf.cast(r * tf.cast(positive_count, tf.float32), tf.int32) - positive_count
-    negative_indices = tf.random_shuffle(negative_indices)[:negative_count]
-    # Gather selected ROIs
+    negative_indices = tf.random_shuffle(negative_indices)[:negative_count]   #取样负样本序号
+    # Gather selected ROIs 从序号中取样
     positive_rois = tf.gather(proposals, positive_indices)
     negative_rois = tf.gather(proposals, negative_indices)
 
@@ -585,7 +600,7 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     roi_gt_boxes = tf.gather(gt_boxes, roi_gt_box_assignment)
     roi_gt_class_ids = tf.gather(gt_class_ids, roi_gt_box_assignment)
 
-    # Compute bbox refinement for positive ROIs
+    # Compute bbox refinement for positive ROIs 对于正的rois计算bbox回归
     deltas = utils.box_refinement_graph(positive_rois, roi_gt_boxes)
     deltas /= config.BBOX_STD_DEV
 

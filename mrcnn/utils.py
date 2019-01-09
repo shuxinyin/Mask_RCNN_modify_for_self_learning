@@ -717,10 +717,12 @@ def compute_matches(gt_boxes, gt_class_ids, gt_masks,
                 gt_match[j] = i
                 pred_match[i] = j
                 break
-
+#gtmatch返回的是和他匹配的predmatch的序号list
+#同理,predmatch也是gtmatch的序号list
+#overlap是两个的iou值矩阵
     return gt_match, pred_match, overlaps
 
-
+#给定一个iou的阈值,计算mean average precision
 def compute_ap(gt_boxes, gt_class_ids, gt_masks,
                pred_boxes, pred_class_ids, pred_scores, pred_masks,
                iou_threshold=0.5):
@@ -738,9 +740,9 @@ def compute_ap(gt_boxes, gt_class_ids, gt_masks,
         pred_boxes, pred_class_ids, pred_scores, pred_masks,
         iou_threshold)
 
-    # Compute precision and recall at each prediction box step
-    precisions = np.cumsum(pred_match > -1) / (np.arange(len(pred_match)) + 1)
-    recalls = np.cumsum(pred_match > -1).astype(np.float32) / len(gt_match)
+    # Compute precision and recall at each prediction box step  predmatch是预测框对准真实框的序号,
+    precisions = np.cumsum(pred_match > -1) / (np.arange(len(pred_match)) + 1)  #累加和/对应时刻的个数
+    recalls = np.cumsum(pred_match > -1).astype(np.float32) / len(gt_match)  #计算gtmatch 被识别出来的概率
 
     # Pad with start and end values to simplify the math
     precisions = np.concatenate([[0], precisions, [0]])
@@ -846,7 +848,7 @@ def batch_slice(inputs, graph_fn, batch_size, names=None):
 
     return result
 
-
+#下载训练好的参数
 def download_trained_weights(coco_model_path, verbose=1):
     """Download COCO trained weights from Releases.
 
@@ -859,7 +861,7 @@ def download_trained_weights(coco_model_path, verbose=1):
     if verbose > 0:
         print("... done downloading pretrained model!")
 
-
+#把图像坐标的boxes转换到归一化坐标
 def norm_boxes(boxes, shape):
     """Converts boxes from pixel coordinates to normalized coordinates.
     boxes: [N, (y1, x1, y2, x2)] in pixel coordinates
@@ -876,7 +878,7 @@ def norm_boxes(boxes, shape):
     shift = np.array([0, 0, 1, 1])
     return np.divide((boxes - shift), scale).astype(np.float32)
 
-
+#把box框坐标转换到图像尺寸,
 def denorm_boxes(boxes, shape):
     """Converts boxes from normalized coordinates to pixel coordinates.
     boxes: [N, (y1, x1, y2, x2)] in normalized coordinates
