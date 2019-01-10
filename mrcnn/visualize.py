@@ -30,7 +30,7 @@ from mrcnn import utils
 ############################################################
 #  Visualization
 ############################################################
-
+#显示图片，可以包含类别title
 def display_images(images, titles=None, cols=4, cmap=None, norm=None,
                    interpolation=None):
     """Display the given set of images, optionally with titles.
@@ -54,7 +54,7 @@ def display_images(images, titles=None, cols=4, cmap=None, norm=None,
         i += 1
     plt.show()
 
-
+#随机产生颜色
 def random_colors(N, bright=True):
     """
     Generate random colors.
@@ -67,9 +67,10 @@ def random_colors(N, bright=True):
     random.shuffle(colors)
     return colors
 
-
+#把mask用到图片上
 def apply_mask(image, mask, color, alpha=0.5):
     """Apply the given mask to the image.
+    在mask为的像素点的个通道执行前面的操作，在mask为的像素点保持图片颜色不变
     """
     for c in range(3):
         image[:, :, c] = np.where(mask == 1,
@@ -78,7 +79,7 @@ def apply_mask(image, mask, color, alpha=0.5):
                                   image[:, :, c])
     return image
 
-
+#显示图片中的实例（物体target）
 def display_instances(image, boxes, masks, class_ids, class_names,
                       scores=None, title="",
                       figsize=(16, 16), ax=None,
@@ -149,7 +150,7 @@ def display_instances(image, boxes, masks, class_ids, class_names,
         # Mask
         mask = masks[:, :, i]
         if show_mask:
-            masked_image = apply_mask(masked_image, mask, color)
+            masked_image = apply_mask(masked_image, mask, color) #把mask加到image上
 
         # Mask Polygon
         # Pad to ensure proper polygons for masks that touch image edges.
@@ -166,7 +167,7 @@ def display_instances(image, boxes, masks, class_ids, class_names,
     if auto_show:
         plt.show()
 
-
+#显示gtbox和predict出来的结果的不同
 def display_differences(image,
                         gt_box, gt_class_id, gt_mask,
                         pred_box, pred_class_id, pred_score, pred_mask,
@@ -175,7 +176,8 @@ def display_differences(image,
                         iou_threshold=0.5, score_threshold=0.5):
     """Display ground truth and prediction instances on the same image."""
     # Match predictions to ground truth
-    gt_match, pred_match, overlaps = utils.compute_matches(
+    gt_match, pred_match, overlaps = utils.compute_matches(  #调用计算匹配的函数，返回每个gtbox对应的predictbox的序号，
+                                                            # pre同理，还有gt和pre的iou矩阵
         gt_box, gt_class_id, gt_mask,
         pred_box, pred_class_id, pred_score, pred_mask,
         iou_threshold=iou_threshold, score_threshold=score_threshold)
@@ -204,7 +206,7 @@ def display_differences(image,
         colors=colors, captions=captions,
         title=title)
 
-
+#化roi框
 def draw_rois(image, rois, refined_rois, mask, class_ids, class_names, limit=10):
     """
     anchors: [n, (y1, x1, y2, x2)] list of anchors in image coordinates.
@@ -278,7 +280,7 @@ def draw_box(image, box, color):
     image[y1:y2, x2:x2 + 2] = color
     return image
 
-
+#显示top mask
 def display_top_masks(image, mask, class_ids, class_names, limit=4):
     """Display the given image and the top few class masks."""
     to_display = []
@@ -301,7 +303,7 @@ def display_top_masks(image, mask, class_ids, class_names, limit=4):
         titles.append(class_names[class_id] if class_id != -1 else "-")
     display_images(to_display, titles=titles, cols=limit + 1, cmap="Blues_r")
 
-
+#画精度回归曲线
 def plot_precision_recall(AP, precisions, recalls):
     """Draw the precision-recall curve.
     AP: Average precision at IoU >= 0.5
@@ -315,7 +317,7 @@ def plot_precision_recall(AP, precisions, recalls):
     ax.set_xlim(0, 1.1)
     _ = ax.plot(recalls, precisions)
 
-
+#画出重叠度曲线
 def plot_overlaps(gt_class_ids, pred_class_ids, pred_scores,
                   overlaps, class_names, threshold=0.5):
     """Draw a grid showing how ground truth objects are classified.
@@ -326,8 +328,8 @@ def plot_overlaps(gt_class_ids, pred_class_ids, pred_scores,
     class_names: list of all class names in the dataset
     threshold: Float. The prediction probability required to predict a class
     """
-    gt_class_ids = gt_class_ids[gt_class_ids != 0]
-    pred_class_ids = pred_class_ids[pred_class_ids != 0]
+    gt_class_ids = gt_class_ids[gt_class_ids != 0]  #GT类别不为0，就是有类别
+    pred_class_ids = pred_class_ids[pred_class_ids != 0] #同上
 
     plt.figure(figsize=(12, 10))
     plt.imshow(overlaps, interpolation='nearest', cmap=plt.cm.Blues)
@@ -341,8 +343,8 @@ def plot_overlaps(gt_class_ids, pred_class_ids, pred_scores,
     for i, j in itertools.product(range(overlaps.shape[0]),
                                   range(overlaps.shape[1])):
         text = ""
-        if overlaps[i, j] > threshold:
-            text = "match" if gt_class_ids[j] == pred_class_ids[i] else "wrong"
+        if overlaps[i, j] > threshold:  #如果gtbox和predit的iou值大于阈值
+            text = "match" if gt_class_ids[j] == pred_class_ids[i] else "wrong"  #gt和pred类别就是匹配的
         color = ("white" if overlaps[i, j] > thresh
                  else "black" if overlaps[i, j] > 0
                  else "grey")
@@ -354,7 +356,7 @@ def plot_overlaps(gt_class_ids, pred_class_ids, pred_scores,
     plt.xlabel("Ground Truth")
     plt.ylabel("Predictions")
 
-
+#画box框
 def draw_boxes(image, boxes=None, refined_boxes=None,
                masks=None, captions=None, visibilities=None,
                title="", ax=None):
@@ -456,7 +458,7 @@ def draw_boxes(image, boxes=None, refined_boxes=None,
                 ax.add_patch(p)
     ax.imshow(masked_image.astype(np.uint8))
 
-
+#以表的形式显示值
 def display_table(table):
     """Display values in a table format.
     table: an iterable of rows, and each row is an iterable of values.
